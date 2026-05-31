@@ -1,0 +1,66 @@
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  splits_file: "data/splits/split_metadata.csv"
+  train_ratio: 0.80
+  val_ratio: 0.10
+  test_ratio: 0.10
+  image_size: 224
+
+preprocessing:
+  ela_quality: 75
+  ela_amplify: 15
+  srm_filter_count: 30
+  min_file_size_kb: 12
+  min_dimension: 32
+  apply_orientation: true
+  supported_formats:
+    - ".jpg"
+    - ".jpeg"
+    - ".png"
+    - ".webp"
+    - ".heic"
+    - ".heif"
+  target_size: 224
+  image_interpolation: "linear"
+  mask_interpolation: "linear"
+  preserve_aspect_ratio: false
+  imagenet_mean:
+    - 0.485
+    - 0.456
+    - 0.406
+  imagenet_std:
+    - 0.229
+    - 0.224
+    - 0.225
+  normalise_scale: 255.0
+
+model:
+  backbone: "efficientnet_b0"
+  pretrained_rgb: true
+  pretrained_noise: false
+  feature_dim: 1280
+  fused_dim: 2560
+  hidden_dim: 512
+  dropout: 0.3
+  num_classes: 1
+
+training:
+  phase1_epochs: 10
+  phase2_epochs: 30
+  batch_size: 32
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  dice_loss_weight: 0.5
+  freeze_bn: true
+  early_stopping_patience: 7
+
+inference:
+  confidence_threshold: 0.5
+  mask_threshold: 0.5
+  target_ms: 50
+
+paths:
+  checkpoint_dir: "models/checkpoints"
+  export_dir: "models/exported"
+  log_dir: "logs"

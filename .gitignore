@@ -1,0 +1,7 @@
+data/raw/
+models/
+logs/
+.env
+__pycache__/
+*.pyc
+*.pyo
