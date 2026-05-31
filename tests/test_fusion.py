@@ -107,6 +107,7 @@ class TestFeatureFusionForward:
 
     def test_single_sample(self):
         fusion = FeatureFusion()
+        fusion.eval()
         rgb = torch.randn(1, 1280)
         noise = torch.randn(1, 1280)
         out = fusion(rgb, noise)
@@ -189,6 +190,7 @@ class TestAdaptiveFusionForward:
 
     def test_gate_outputs_vary_with_input(self):
         fusion = AdaptiveFusion()
+        fusion.eval()
         rgb_a = torch.ones(1, 1280)
         noise_a = torch.ones(1, 1280)
         rgb_b = torch.zeros(1, 1280)
@@ -199,6 +201,7 @@ class TestAdaptiveFusionForward:
 
     def test_single_sample(self):
         fusion = AdaptiveFusion()
+        fusion.eval()
         rgb = torch.randn(1, 1280)
         noise = torch.randn(1, 1280)
         out = fusion(rgb, noise)

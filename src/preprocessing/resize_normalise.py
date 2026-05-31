@@ -75,7 +75,10 @@ def resize_mask(
             resized = np.clip(resized, 0, 1)
         return resized
 
+    single_channel = mask.shape[2] == 1
     resized = cv2.resize(mask, (target_size, target_size), interpolation=interpolation)
+    if single_channel and resized.ndim == 2:
+        resized = resized[..., np.newaxis]
     if interpolation != cv2.INTER_NEAREST:
         resized = np.clip(resized, 0, 1)
     return resized

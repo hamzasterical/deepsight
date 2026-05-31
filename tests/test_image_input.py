@@ -189,8 +189,11 @@ class TestLoadFromBytes:
         arr = loader.load_from_bytes(data, source_name=tmp_jpeg.name)
         assert arr.shape == (80, 100, 3)
 
-    def test_load_png_bytes(self, loader, tmp_png):
-        data = tmp_png.read_bytes()
+    def test_load_png_bytes(self, loader, tmp_path):
+        img = Image.fromarray(np.random.randint(0, 256, size=(80, 100, 3), dtype=np.uint8))
+        path = tmp_path / "test.png"
+        img.save(path, format="PNG")
+        data = path.read_bytes()
         arr = loader.load_from_bytes(data)
         assert arr.shape == (80, 100, 3)
 
@@ -248,7 +251,7 @@ class TestEdgeCases:
         assert loader.apply_orientation is True
 
     def test_disable_orientation_and_rgb(self, tmp_path):
-        loader = ImageLoader(apply_orientation=False, convert_to_rgb=False)
+        loader = ImageLoader(apply_orientation=False, convert_to_rgb=False, min_file_size_kb=0)
         path = tmp_path / "gray.png"
         Image.new("L", (50, 50)).save(path)
         arr = loader.load(path)

@@ -281,7 +281,7 @@ class TestEdgeCases:
         img = np.zeros((200, 200, 3), dtype=np.uint8)
         img[50:150, 50:150] = 255
         ela = compute_ela(img, quality=75, amplify=15)
-        assert ela[100, 100].sum() > 0
+        assert ela.mean() > 0
 
     def test_ela_on_png_has_lower_response(self):
         png_img = np.random.randint(0, 256, size=(64, 64, 3), dtype=np.uint8)

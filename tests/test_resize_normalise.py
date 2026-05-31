@@ -110,15 +110,15 @@ class TestResizeWithAspectRatio:
         tall = np.random.randint(0, 256, size=(400, 100, 3), dtype=np.uint8)
         result = resize_with_aspect_ratio(tall, target_size=224)
         assert result.shape == (224, 224, 3)
-        assert (result[0, :, :] == 0).all()
-        assert (result[-1, :, :] == 0).all()
+        assert (result[:, 0, :] == 0).all()
+        assert (result[:, -1, :] == 0).all()
 
     def test_wide_image_padding(self):
         wide = np.random.randint(0, 256, size=(100, 400, 3), dtype=np.uint8)
         result = resize_with_aspect_ratio(wide, target_size=224)
         assert result.shape == (224, 224, 3)
-        assert (result[:, 0, :] == 0).all()
-        assert (result[:, -1, :] == 0).all()
+        assert (result[0, :, :] == 0).all()
+        assert (result[-1, :, :] == 0).all()
 
     def test_custom_padding_value(self, rgb_image):
         result = resize_with_aspect_ratio(rgb_image, target_size=224, padding_value=128)
