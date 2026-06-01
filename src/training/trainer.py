@@ -92,7 +92,8 @@ class Trainer:
         for batch in dataloader:
             rgb = batch["rgb"].to(self.device)
             noise = batch["noise"].to(self.device)
-            labels = batch["label"].numpy()
+            labels = batch["label"].cpu().numpy()
+            masks = batch["mask"].cpu().numpy()
             forgery_types = batch.get("forgery_type", [None] * len(labels))
 
             pred_labels, pred_masks = self.model(rgb, noise)
@@ -101,7 +102,7 @@ class Trainer:
             all_labels.extend(labels)
             all_preds.extend(batch_to_numpy(pred_probs).flatten())
             all_masks.extend(batch_to_numpy(pred_masks))
-            all_gt_masks.extend(batch_to_numpy(masks))
+            all_gt_masks.extend(masks)
             all_forgery_types.extend(forgery_types)
 
         all_labels = np.array(all_labels)

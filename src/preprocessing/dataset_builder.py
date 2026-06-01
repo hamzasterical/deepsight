@@ -1,15 +1,11 @@
-import csv
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 import pandas as pd
-from torch.utils.data import Dataset
-
 import torch
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
+from torch.utils.data import Dataset
 
 from src.preprocessing.augmentation import get_train_transform, get_val_transform
 from src.preprocessing.ela import compute_ela, ela_to_3channel
@@ -109,30 +105,25 @@ def _detect_casia_forgery_type(img_path: Path) -> str:
 def _scan_coverage(coverage_dir: Path, min_size_kb: float) -> List[Dict]:
     records = []
     image_dir = coverage_dir / "image"
-    label_dir = coverage_dir / "label"
+    mask_dir = coverage_dir / "mask"
 
     if not image_dir.exists():
         return records
 
+    mask_map = {}
+    if mask_dir.exists():
+        for mask_path in list_files(mask_dir, extensions=[".png", ".jpg", ".jpeg", ".tif", ".tiff"]):
+            mask_map[mask_path.stem] = mask_path
+
     for img_path in read_image_paths(image_dir, recursive=True, min_file_size_kb=min_size_kb):
+        mask_path = mask_map.get(img_path.stem)
         records.append({
             "image_path": str(img_path),
-            "mask_path": "",
+            "mask_path": str(mask_path) if mask_path else "",
             "label": 1,
             "forgery_type": "Copy-Move",
             "dataset_source": "Coverage",
         })
-
-    if label_dir.exists():
-        for img_path in read_image_paths(image_dir, recursive=True, min_file_size_kb=min_size_kb):
-            stem = img_path.stem
-            label_files = list_files(label_dir, extensions=[".mat", ".png", ".jpg", ".tif"])
-            for lf in label_files:
-                if stem in lf.stem:
-                    for rec in records:
-                        if rec["image_path"] == str(img_path):
-                            rec["mask_path"] = str(lf)
-                            break
 
     return records
 
@@ -232,13 +223,12 @@ class ForgeryDataset(Dataset):
 
         ela = compute_ela(image)
         ela_3ch = ela_to_3channel(ela)
-        import numpy as np
         ela_tensor = torch.from_numpy(ela_3ch.transpose(2, 0, 1).astype(np.float32) / 255.0)
         if ela_tensor.shape[0] == 1:
             ela_tensor = ela_tensor.repeat(3, 1, 1)
 
         noise = extract_srm_noise_batch(image[np.newaxis, ...], self.srm_layer)
-        noise_tensor = torch.from_numpy(noise[0]).float()
+        noise_tensor = torch.from_numpy(noise[0].transpose(2, 0, 1)).float()
 
         noise_input = torch.cat([noise_tensor, ela_tensor], dim=0)
 

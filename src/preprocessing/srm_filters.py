@@ -325,20 +325,25 @@ def extract_srm_noise(image: np.ndarray) -> np.ndarray:
     return noise_np
 
 
-def extract_srm_noise_batch(images: np.ndarray) -> np.ndarray:
+def extract_srm_noise_batch(
+    images: np.ndarray,
+    srm_layer: nn.Module = None,
+) -> np.ndarray:
     if images.ndim != 4 or images.shape[3] != 3:
         raise ValueError(f"Expected NHWC batch, got shape {images.ndim}")
 
-    dtype_in = images.dtype
     if images.dtype == np.uint8:
         images = images.astype(np.float32)
 
     tensor = torch.from_numpy(images).permute(0, 3, 1, 2)
 
+    layer = srm_layer or SRMFilterLayer()
+    layer.eval()
+    device = next(layer.parameters()).device
+    tensor = tensor.to(device)
+
     with torch.no_grad():
-        layer = SRMFilterLayer()
-        layer.eval()
         noise = layer(tensor)
 
-    noise_np = noise.permute(0, 2, 3, 1).numpy()
+    noise_np = noise.permute(0, 2, 3, 1).cpu().numpy()
     return noise_np

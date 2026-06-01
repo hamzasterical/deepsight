@@ -62,7 +62,7 @@ class Predictor:
             ela_tensor = ela_tensor.repeat(1, 3, 1, 1)
 
         noise = extract_srm_noise_batch(resized_rgb[np.newaxis, ...], self.srm_layer)
-        noise_tensor = torch.from_numpy(noise).to(self.device).float()
+        noise_tensor = torch.from_numpy(noise).permute(0, 3, 1, 2).to(self.device).float()
 
         noise_input = torch.cat([noise_tensor, ela_tensor], dim=1)
 
