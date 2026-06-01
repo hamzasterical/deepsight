@@ -4,3 +4,8 @@ from src.utils.file_utils import (
     list_files,
     read_image_paths,
 )
+from src.utils.visualization import (
+    create_comparison_grid,
+    create_heatmap_overlay,
+    create_red_overlay,
+)
