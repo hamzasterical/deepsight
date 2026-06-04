@@ -17,5 +17,4 @@ def create_scheduler(
         patience=patience,
         threshold=threshold,
         min_lr=min_lr,
-        verbose=True,
     )
