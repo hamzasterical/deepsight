@@ -7,7 +7,11 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from src.preprocessing.augmentation import get_train_transform, get_val_transform
+from src.preprocessing.augmentation import (
+    get_geometric_transform,
+    get_normalize_transform,
+    get_photometric_transform,
+)
 from src.preprocessing.ela import compute_ela, ela_to_3channel
 from src.preprocessing.srm_filters import SRMFilterLayer, extract_srm_noise_batch
 from src.utils.file_utils import ensure_dir, list_files, read_image_paths
@@ -165,7 +169,7 @@ def _stratified_split(df: pd.DataFrame, data_config: dict) -> pd.DataFrame:
     df["split"] = "test"
 
     for ftype in df["forgery_type"].unique():
-        type_idx = df[df["forgery_type"] == ftype].index.to_numpy()
+        type_idx = df[df["forgery_type"] == ftype].index.to_numpy(copy=True)
         np.random.shuffle(type_idx)
         n = len(type_idx)
         n_train = int(n * train_ratio)
@@ -190,7 +194,9 @@ class ForgeryDataset(Dataset):
     ):
         self.data = dataframe[dataframe["split"] == split].reset_index(drop=True)
         self.split = split
-        self.transform = transform or (get_train_transform() if split == "train" else get_val_transform())
+        self.geometric = get_geometric_transform(split)
+        self.photometric = get_photometric_transform(split)
+        self.normalize = get_normalize_transform()
         self.srm_layer = srm_layer
         self._srm_cache = {}
 
@@ -206,8 +212,9 @@ class ForgeryDataset(Dataset):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         mask = None
-        if row["mask_path"] and Path(row["mask_path"]).exists():
-            mask = cv2.imread(row["mask_path"], cv2.IMREAD_GRAYSCALE)
+        mask_path = row["mask_path"]
+        if isinstance(mask_path, str) and mask_path and Path(mask_path).exists():
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
             if mask is not None:
                 _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                 mask = mask.astype(np.float32) / 255.0
@@ -215,22 +222,31 @@ class ForgeryDataset(Dataset):
         if mask is None:
             mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.float32)
 
-        augmented = self.transform(image=image, mask=mask)
-        image_tensor = augmented["image"]
-        mask_tensor = augmented["mask"].unsqueeze(0).float()
+        # Geometric augmentation first: produces a fixed-size (224x224) image and
+        # mask that stay spatially aligned. Forensic features are derived from the
+        # SAME augmented image so the noise branch input matches the RGB input.
+        geo = self.geometric(image=image, mask=mask)
+        image_aug = geo["image"]
+        mask_aug = geo["mask"]
 
-        rgb = image_tensor.float()
+        mask_tensor = torch.from_numpy(np.ascontiguousarray(mask_aug)).unsqueeze(0).float()
 
-        ela = compute_ela(image)
+        ela = compute_ela(image_aug)
         ela_3ch = ela_to_3channel(ela)
         ela_tensor = torch.from_numpy(ela_3ch.transpose(2, 0, 1).astype(np.float32) / 255.0)
         if ela_tensor.shape[0] == 1:
             ela_tensor = ela_tensor.repeat(3, 1, 1)
 
-        noise = extract_srm_noise_batch(image[np.newaxis, ...], self.srm_layer)
+        noise = extract_srm_noise_batch(image_aug[np.newaxis, ...], self.srm_layer)
         noise_tensor = torch.from_numpy(noise[0].transpose(2, 0, 1)).float()
 
         noise_input = torch.cat([noise_tensor, ela_tensor], dim=0)
+
+        # Photometric augmentation (train only) + normalization for the RGB branch.
+        rgb_img = image_aug
+        if self.photometric is not None:
+            rgb_img = self.photometric(image=image_aug)["image"]
+        rgb = self.normalize(image=rgb_img)["image"].float()
 
         return {
             "rgb": rgb,
@@ -249,10 +265,13 @@ def create_dataloaders(
     srm_layer: Optional[SRMFilterLayer] = None,
 ) -> Tuple:
     splits_file = Path(config["data"]["splits_file"])
-    if not splits_file.exists():
+    if not splits_file.exists() or splits_file.stat().st_size == 0:
         df = build_dataset_metadata(config)
     else:
-        df = pd.read_csv(splits_file)
+        try:
+            df = pd.read_csv(splits_file)
+        except pd.errors.EmptyDataError:
+            df = build_dataset_metadata(config)
 
     train_ds = ForgeryDataset(df, "train", srm_layer=srm_layer)
     val_ds = ForgeryDataset(df, "val", srm_layer=srm_layer)

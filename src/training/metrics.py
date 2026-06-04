@@ -46,6 +46,10 @@ def _compute_single(
     gt_masks: np.ndarray,
 ) -> dict:
     result = {}
+    # Labels/preds may arrive shaped [N, 1]; flatten to 1-D so scalar conversion,
+    # sklearn metrics, and the accuracy comparison all behave correctly.
+    labels = np.asarray(labels).ravel()
+    preds = np.asarray(preds).ravel()
     if len(np.unique(labels)) >= 2:
         result["auc_roc"] = float(roc_auc_score(labels, preds))
     else:
