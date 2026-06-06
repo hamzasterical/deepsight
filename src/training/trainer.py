@@ -73,6 +73,8 @@ class Trainer:
         num_batches = 0
 
         for batch in dataloader:
+            if batch is None:
+                continue
             rgb = batch["rgb"].to(self.device)
             noise = batch["noise"].to(self.device)
             labels = batch["label"].to(self.device).float().view(-1)
@@ -103,6 +105,8 @@ class Trainer:
         val_batches = 0
 
         for batch in dataloader:
+            if batch is None:
+                continue
             rgb = batch["rgb"].to(self.device)
             noise = batch["noise"].to(self.device)
             labels_np = batch["label"].cpu().numpy()

@@ -48,6 +48,16 @@ def build_model(config: dict) -> DualBranchModel:
 
 
 def main() -> None:
+    # ── Audit dataset for missing/corrupt files before training ──────────────
+    import subprocess, sys
+    audit_result = subprocess.run(
+        [sys.executable, "scripts/audit_dataset.py", "--fix"],
+        capture_output=False,
+    )
+    if audit_result.returncode != 0:
+        print("\n[train.py] Dataset audit removed bad rows from split_metadata.csv.")
+        print("[train.py] Continuing with clean dataset.\n")
+
     parser = argparse.ArgumentParser(description="Train the DeepSight model")
     parser.add_argument(
         "--config",

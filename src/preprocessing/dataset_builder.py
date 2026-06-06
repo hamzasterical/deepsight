@@ -199,33 +199,62 @@ class ForgeryDataset(Dataset):
         self.normalize = get_normalize_transform()
         self.srm_layer = srm_layer
         self._srm_cache = {}
+        self._logged_missing: set = set()
 
     def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx: int) -> dict:
-        row = self.data.iloc[idx]
-        image = cv2.imread(row["image_path"])
-        if image is None:
-            return self.__getitem__((idx + 1) % len(self.data))
+    def __getitem__(self, idx: int):
+        max_attempts = len(self.data)
+        for attempt in range(max_attempts):
+            current_idx = (idx + attempt) % len(self.data)
+            try:
+                row = self.data.iloc[current_idx]
+                sample = self._load_sample(row)
+                if sample is not None:
+                    return sample
+            except Exception as e:
+                img_path = str(row.get("image_path", current_idx)) if attempt == 0 else None
+                if img_path and img_path not in self._logged_missing:
+                    self._logged_missing.add(img_path)
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"Skipping unreadable sample (attempt {attempt}): {img_path} — {e}"
+                    )
+                continue
 
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        raise RuntimeError(
+            f"ForgeryDataset: could not find ANY valid sample after scanning "
+            f"all {max_attempts} entries. Check that data/raw/ files exist on disk."
+        )
+
+    def _load_sample(self, row) -> dict | None:
+        import cv2
+        import numpy as np
+
+        image_path = str(row["image_path"])
+        mask_path  = str(row.get("mask_path", ""))
+        label      = int(row["label"])
+        forgery_type = str(row.get("forgery_type", "authentic"))
+
+        img = cv2.imread(image_path)
+        if img is None:
+            return None
+        if img.ndim != 3 or img.shape[2] != 3:
+            return None
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         mask = None
-        mask_path = row["mask_path"]
-        if isinstance(mask_path, str) and mask_path and Path(mask_path).exists():
+        if isinstance(mask_path, str) and mask_path and mask_path != "nan" and Path(mask_path).exists():
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
             if mask is not None:
                 _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                 mask = mask.astype(np.float32) / 255.0
 
         if mask is None:
-            mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.float32)
+            mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.float32)
 
-        # Geometric augmentation first: produces a fixed-size (224x224) image and
-        # mask that stay spatially aligned. Forensic features are derived from the
-        # SAME augmented image so the noise branch input matches the RGB input.
-        geo = self.geometric(image=image, mask=mask)
+        geo = self.geometric(image=img, mask=mask)
         image_aug = geo["image"]
         mask_aug = geo["mask"]
 
@@ -242,7 +271,6 @@ class ForgeryDataset(Dataset):
 
         noise_input = torch.cat([noise_tensor, ela_tensor], dim=0)
 
-        # Photometric augmentation (train only) + normalization for the RGB branch.
         rgb_img = image_aug
         if self.photometric is not None:
             rgb_img = self.photometric(image=image_aug)["image"]
@@ -251,11 +279,22 @@ class ForgeryDataset(Dataset):
         return {
             "rgb": rgb,
             "noise": noise_input,
-            "label": torch.tensor([row["label"]], dtype=torch.float32),
+            "label": torch.tensor([label], dtype=torch.float32),
             "mask": mask_tensor,
-            "forgery_type": row["forgery_type"],
-            "image_path": row["image_path"],
+            "forgery_type": forgery_type,
+            "image_path": image_path,
         }
+
+
+def _safe_collate(batch):
+    """Drop None entries that slipped through __getitem__."""
+    import torch
+    from torch.utils.data.dataloader import default_collate
+
+    batch = [b for b in batch if b is not None]
+    if len(batch) == 0:
+        return None
+    return default_collate(batch)
 
 
 def create_dataloaders(
@@ -289,12 +328,15 @@ def create_dataloaders(
     )
     train_loader = torch.utils.data.DataLoader(
         train_ds, batch_size=batch_size, sampler=sampler, num_workers=num_workers,
+        pin_memory=True, collate_fn=_safe_collate,
     )
     val_loader = torch.utils.data.DataLoader(
         val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+        pin_memory=True, collate_fn=_safe_collate,
     )
     test_loader = torch.utils.data.DataLoader(
         test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+        pin_memory=True, collate_fn=_safe_collate,
     )
 
     return train_loader, val_loader, test_loader
