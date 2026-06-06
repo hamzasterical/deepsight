@@ -24,8 +24,8 @@ RAW_DIR  = Path("data/raw")
 
 def audit(fix: bool = False, deep: bool = False):
     if not CSV_PATH.exists():
-        print(f"ERROR: {CSV_PATH} not found. Run dataset_builder first.")
-        sys.exit(1)
+        print(f"NOTE: {CSV_PATH} not found — will be built from scratch by train.py.")
+        return 0
 
     df = pd.read_csv(CSV_PATH)
     total = len(df)

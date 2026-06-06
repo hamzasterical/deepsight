@@ -55,6 +55,8 @@ def main() -> None:
         capture_output=False,
     )
     if audit_result.returncode != 0:
+        # Exit code 1 means bad rows were found and fixed; exit code 0 means
+        # no issues (or CSV didn't exist and will be built by create_dataloaders).
         print("\n[train.py] Dataset audit removed bad rows from split_metadata.csv.")
         print("[train.py] Continuing with clean dataset.\n")
 

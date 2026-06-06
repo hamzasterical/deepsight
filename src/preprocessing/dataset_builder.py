@@ -317,19 +317,27 @@ def create_dataloaders(
     test_ds = ForgeryDataset(df, "test", srm_layer=srm_layer)
 
     # ── Weighted sampler to fix 3.5:1 authentic:forged imbalance ─────────────
-    labels = [int(train_ds.data.iloc[i]["label"]) for i in range(len(train_ds.data))]
-    class_counts = [labels.count(0), labels.count(1)]
-    class_weights = [1.0 / max(c, 1) for c in class_counts]
-    sample_weights = [class_weights[l] for l in labels]
-    sampler = torch.utils.data.WeightedRandomSampler(
-        weights=sample_weights,
-        num_samples=len(sample_weights),
-        replacement=True,
-    )
-    train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=batch_size, sampler=sampler, num_workers=num_workers,
-        pin_memory=True, collate_fn=_safe_collate,
-    )
+    use_sampler = config.get("training", {}).get("use_weighted_sampler", True)
+
+    if use_sampler:
+        labels = [int(train_ds.data.iloc[i]["label"]) for i in range(len(train_ds.data))]
+        class_counts = [labels.count(0), labels.count(1)]
+        class_weights = [1.0 / max(c, 1) for c in class_counts]
+        sample_weights = [class_weights[l] for l in labels]
+        sampler = torch.utils.data.WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(sample_weights),
+            replacement=True,
+        )
+        train_loader = torch.utils.data.DataLoader(
+            train_ds, batch_size=batch_size, sampler=sampler, num_workers=num_workers,
+            pin_memory=True, collate_fn=_safe_collate,
+        )
+    else:
+        train_loader = torch.utils.data.DataLoader(
+            train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers,
+            pin_memory=True, collate_fn=_safe_collate,
+        )
     val_loader = torch.utils.data.DataLoader(
         val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers,
         pin_memory=True, collate_fn=_safe_collate,

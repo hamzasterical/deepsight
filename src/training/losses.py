@@ -21,7 +21,7 @@ class DiceLoss(nn.Module):
 class CombinedLoss(nn.Module):
     def __init__(
         self,
-        pos_weight: float = 3.5,
+        pos_weight: float = 1.0,
         dice_weight: float = 0.5,
         bce_mask_weight: float = 0.3,
         label_smoothing: float = 0.05,

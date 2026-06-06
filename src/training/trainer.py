@@ -40,7 +40,7 @@ class Trainer:
         self.early_stop_patience = train_cfg.get("early_stopping_patience", 7)
 
         # ── Loss ─────────────────────────────────────────────────────────────────
-        pos_weight      = float(self.cfg["training"].get("pos_weight", 3.5))
+        pos_weight      = float(self.cfg["training"].get("pos_weight", 1.0))
         dice_weight     = float(self.cfg["training"].get("dice_loss_weight", 0.5))
         bce_mask_weight = float(self.cfg["training"].get("bce_mask_weight", 0.3))
         label_smoothing = float(self.cfg["training"].get("label_smoothing", 0.05))

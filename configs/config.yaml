@@ -55,14 +55,16 @@ training:
   bce_mask_weight: 0.3
   freeze_bn: false
   early_stopping_patience: 12
-  pos_weight: 3.5
+  pos_weight: 1.0
   warmup_epochs: 5
   scheduler: "cosine"
   label_smoothing: 0.05
+  use_weighted_sampler: true
+  num_workers: 4
 
 inference:
-  confidence_threshold: 0.35
-  mask_threshold: 0.40
+  confidence_threshold: 0.45
+  mask_threshold: 0.45
   target_ms: 50
 
 paths:

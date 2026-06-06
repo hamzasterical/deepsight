@@ -115,8 +115,7 @@ class Predictor:
             raise ValueError(f"Failed to read image: {path}")
         return self.predict(image)
 
-    @staticmethod
-    def _classify_forgery_type(mask: np.ndarray, verdict: str) -> str:
+    def _classify_forgery_type(self, mask: np.ndarray, verdict: str) -> str:
         if verdict != "FORGED":
             return "Unknown"
         if mask.size == 0:

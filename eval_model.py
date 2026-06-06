@@ -106,6 +106,36 @@ def collect_samples():
     return samples
 
 
+def find_optimal_threshold(y_true, y_scores, metric="f1"):
+    from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score
+    import numpy as np
+
+    thresholds = np.arange(0.10, 0.91, 0.05)
+    best_thresh = 0.5
+    best_score  = 0.0
+
+    print("\nThreshold sweep:")
+    print(f"{'Threshold':>10} {'F1':>8} {'Accuracy':>10} {'Precision':>10} {'Recall':>8}")
+    print("-" * 52)
+
+    for t in thresholds:
+        preds = (np.array(y_scores) >= t).astype(int)
+        f1    = f1_score(y_true, preds, zero_division=0)
+        acc   = accuracy_score(y_true, preds)
+        prec  = precision_score(y_true, preds, zero_division=0)
+        rec   = recall_score(y_true, preds, zero_division=0)
+        print(f"{t:>10.2f} {f1:>8.4f} {acc:>10.4f} {prec:>10.4f} {rec:>8.4f}")
+
+        score = f1 if metric == "f1" else acc
+        if score > best_score:
+            best_score  = score
+            best_thresh = t
+
+    print(f"\n-> Best threshold for {metric}: {best_thresh:.2f}  (score={best_score:.4f})")
+    print(f"  Set inference.confidence_threshold: {best_thresh:.2f} in configs/config.yaml")
+    return best_thresh
+
+
 def main():
     print("Loading model...")
     predictor = load_model()
@@ -116,6 +146,7 @@ def main():
 
     all_labels = []
     all_preds = []
+    all_scores = []
     all_masks = []
     all_gt_masks = []
     all_ftypes = []
@@ -124,11 +155,14 @@ def main():
         try:
             result = predictor.predict_from_path(path)
         except Exception as e:
+            if (i + 1) % 50 == 0 or i < 3:
+                print(f"  [{i}] SKIP {path}: {e}")
             continue
 
         prob = result["confidence"] / 100.0
         all_labels.append(label)
         all_preds.append(prob)
+        all_scores.append(prob)
         all_ftypes.append(ftype)
         all_masks.append(np.zeros((224, 224), dtype=np.float32))
         all_gt_masks.append(np.zeros((224, 224), dtype=np.float32))
@@ -149,6 +183,9 @@ def main():
 
     print_evaluation_report(metrics, total_samples=len(samples))
     save_evaluation_report(metrics)
+
+    if len(all_labels) > 0 and len(all_scores) > 0:
+        find_optimal_threshold(all_labels, all_scores, metric="f1")
 
 
 if __name__ == "__main__":
