@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from src.training.losses import CombinedLoss
 from src.training.metrics import batch_to_numpy, compute_metrics
-from src.training.scheduler import create_scheduler
+from src.training.scheduler import build_scheduler
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +30,7 @@ class Trainer:
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+        self.cfg = config
         train_cfg = config.get("training", {})
         self.phase1_epochs = train_cfg.get("phase1_epochs", 10)
         self.phase2_epochs = train_cfg.get("phase2_epochs", 30)
@@ -38,11 +39,28 @@ class Trainer:
         self.dice_weight = train_cfg.get("dice_loss_weight", 0.5)
         self.early_stop_patience = train_cfg.get("early_stopping_patience", 7)
 
+        # ── Loss ─────────────────────────────────────────────────────────────────
+        pos_weight      = float(self.cfg["training"].get("pos_weight", 1.0))
+        dice_weight     = float(self.cfg["training"].get("dice_loss_weight", 0.5))
+        bce_mask_weight = float(self.cfg["training"].get("bce_mask_weight", 0.3))
+        label_smoothing = float(self.cfg["training"].get("label_smoothing", 0.05))
+
+        self.criterion = CombinedLoss(
+            pos_weight=pos_weight,
+            dice_weight=dice_weight,
+            bce_mask_weight=bce_mask_weight,
+            label_smoothing=label_smoothing,
+        ).to(self.device)
+
+        # ── Optimiser ─────────────────────────────────────────────────────────────
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=float(self.cfg["training"]["learning_rate"]),
+            weight_decay=float(self.cfg["training"]["weight_decay"]),
         )
-        self.scheduler = create_scheduler(self.optimizer)
-        self.criterion = CombinedLoss(dice_weight=self.dice_weight)
+
+        # ── Scheduler ─────────────────────────────────────────────────────────────
+        self.scheduler = build_scheduler(self.optimizer, self.cfg)
 
         self.best_val_auc = 0.0
         self.early_stop_counter = 0
@@ -52,32 +70,27 @@ class Trainer:
     def train_epoch(self, dataloader: DataLoader) -> Dict[str, float]:
         self.model.train()
         total_loss = 0.0
-        total_label_loss = 0.0
-        total_mask_loss = 0.0
         num_batches = 0
 
         for batch in dataloader:
+            if batch is None:
+                continue
             rgb = batch["rgb"].to(self.device)
             noise = batch["noise"].to(self.device)
-            labels = batch["label"].to(self.device).float().view(-1, 1)
+            labels = batch["label"].to(self.device).float().view(-1)
             masks = batch["mask"].to(self.device).float()
 
             self.optimizer.zero_grad()
             pred_labels, pred_masks = self.model(rgb, noise)
-            loss = self.criterion(pred_labels, labels, pred_masks, masks)
+            loss = self.criterion(pred_labels, pred_masks, labels, masks)
             loss.backward()
             self.optimizer.step()
 
-            losses = self.criterion.separate(pred_labels, labels, pred_masks, masks)
-            total_loss += losses["total_loss"]
-            total_label_loss += losses["label_loss"]
-            total_mask_loss += losses["mask_loss"]
+            total_loss += loss.item()
             num_batches += 1
 
         return {
             "loss": total_loss / num_batches,
-            "label_loss": total_label_loss / num_batches,
-            "mask_loss": total_mask_loss / num_batches,
         }
 
     @torch.no_grad()
@@ -88,21 +101,34 @@ class Trainer:
         all_masks = []
         all_gt_masks = []
         all_forgery_types = []
+        val_loss_total = 0.0
+        val_batches = 0
 
         for batch in dataloader:
+            if batch is None:
+                continue
             rgb = batch["rgb"].to(self.device)
             noise = batch["noise"].to(self.device)
-            labels = batch["label"].cpu().numpy()
-            masks = batch["mask"].cpu().numpy()
-            forgery_types = batch.get("forgery_type", [None] * len(labels))
+            labels_np = batch["label"].cpu().numpy()
+            masks_np = batch["mask"].cpu().numpy()
+            forgery_types = batch.get("forgery_type", [None] * len(labels_np))
 
             pred_labels, pred_masks = self.model(rgb, noise)
             pred_probs = torch.sigmoid(pred_labels)
 
-            all_labels.extend(labels)
+            loss = self.criterion(
+                pred_labels,
+                pred_masks,
+                batch["label"].to(self.device).float().view(-1),
+                batch["mask"].to(self.device).float(),
+            )
+            val_loss_total += loss.item()
+            val_batches += 1
+
+            all_labels.extend(labels_np)
             all_preds.extend(batch_to_numpy(pred_probs).flatten())
             all_masks.extend(batch_to_numpy(pred_masks))
-            all_gt_masks.extend(masks)
+            all_gt_masks.extend(masks_np)
             all_forgery_types.extend(forgery_types)
 
         all_labels = np.array(all_labels)
@@ -111,6 +137,7 @@ class Trainer:
         all_gt_masks = np.array(all_gt_masks)
 
         metrics = compute_metrics(all_labels, all_preds, all_masks, all_gt_masks, all_forgery_types)
+        metrics["val_loss"] = val_loss_total / max(val_batches, 1)
         metrics["learning_rate"] = self.optimizer.param_groups[0]["lr"]
         return metrics
 
@@ -149,6 +176,14 @@ class Trainer:
         phase1: bool = False,
     ) -> Dict:
         num_epochs = self.phase1_epochs if phase1 else self.phase2_epochs
+
+        if not phase1:
+            if not self.cfg["training"].get("freeze_bn", False):
+                for module in self.model.noise_branch.modules():
+                    if isinstance(module, (torch.nn.BatchNorm2d, torch.nn.BatchNorm1d)):
+                        module.train()
+                        module.weight.requires_grad_(True)
+                        module.bias.requires_grad_(True)
         logger.info(
             "Starting %s training for %d epochs", "Phase 1" if phase1 else "Phase 2", num_epochs
         )
@@ -161,7 +196,13 @@ class Trainer:
             val_metrics = self.validate(val_loader)
 
             val_auc = val_metrics.get("overall", {}).get("auc_roc", 0)
-            self.scheduler.step(val_auc)
+            val_f1 = val_metrics.get("overall", {}).get("f1", 0)
+            val_acc = val_metrics.get("overall", {}).get("accuracy", 0)
+            val_loss = val_metrics.get("val_loss", 0)
+            if self.scheduler._is_plateau:
+                self.scheduler.step(val_auc)
+            else:
+                self.scheduler.step()
 
             elapsed = time.time() - start
             logger.info(
@@ -169,11 +210,33 @@ class Trainer:
                 epoch, num_epochs,
                 train_metrics["loss"],
                 val_auc,
-                val_metrics.get("overall", {}).get("f1", 0),
+                val_f1,
                 val_metrics.get("overall", {}).get("iou", 0),
                 self.optimizer.param_groups[0]["lr"],
                 elapsed,
             )
+
+            # ── Persist per-epoch metrics to CSV ─────────────────────────────────────
+            import csv, os
+            log_path = "logs/training_log.csv"
+            write_header = not os.path.exists(log_path) or os.path.getsize(log_path) == 0
+            with open(log_path, "a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=[
+                    "epoch", "phase", "train_loss", "val_loss",
+                    "val_auc", "val_f1", "val_acc", "lr"
+                ])
+                if write_header:
+                    writer.writeheader()
+                writer.writerow({
+                    "epoch":      epoch,
+                    "phase":      "phase1" if phase1 else "phase2",
+                    "train_loss": round(float(train_metrics["loss"]), 6),
+                    "val_loss":   round(float(val_loss), 6),
+                    "val_auc":    round(float(val_auc), 6),
+                    "val_f1":     round(float(val_f1), 6),
+                    "val_acc":    round(float(val_acc), 6),
+                    "lr":         self.optimizer.param_groups[0]["lr"],
+                })
 
             is_best = val_auc > self.best_val_auc
             if is_best:

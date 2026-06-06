@@ -9,9 +9,9 @@ data:
 
 preprocessing:
   ela_quality: 75
-  ela_amplify: 15
+  ela_amplify: 20
   srm_filter_count: 30
-  min_file_size_kb: 12
+  min_file_size_kb: 6
   min_dimension: 32
   apply_orientation: true
   supported_formats:
@@ -41,23 +41,30 @@ model:
   pretrained_noise: false
   feature_dim: 1280
   fused_dim: 2560
-  hidden_dim: 512
-  dropout: 0.3
+  hidden_dim: 768
+  dropout: 0.2
   num_classes: 1
 
 training:
-  phase1_epochs: 10
-  phase2_epochs: 30
+  phase1_epochs: 20
+  phase2_epochs: 60
   batch_size: 32
   learning_rate: 0.0001
   weight_decay: 0.0001
   dice_loss_weight: 0.5
-  freeze_bn: true
-  early_stopping_patience: 7
+  bce_mask_weight: 0.3
+  freeze_bn: false
+  early_stopping_patience: 12
+  pos_weight: 1.0
+  warmup_epochs: 5
+  scheduler: "cosine"
+  label_smoothing: 0.05
+  use_weighted_sampler: true
+  num_workers: 4
 
 inference:
-  confidence_threshold: 0.5
-  mask_threshold: 0.5
+  confidence_threshold: 0.45
+  mask_threshold: 0.45
   target_ms: 50
 
 paths:

@@ -48,6 +48,18 @@ def build_model(config: dict) -> DualBranchModel:
 
 
 def main() -> None:
+    # ── Audit dataset for missing/corrupt files before training ──────────────
+    import subprocess, sys
+    audit_result = subprocess.run(
+        [sys.executable, "scripts/audit_dataset.py", "--fix"],
+        capture_output=False,
+    )
+    if audit_result.returncode != 0:
+        # Exit code 1 means bad rows were found and fixed; exit code 0 means
+        # no issues (or CSV didn't exist and will be built by create_dataloaders).
+        print("\n[train.py] Dataset audit removed bad rows from split_metadata.csv.")
+        print("[train.py] Continuing with clean dataset.\n")
+
     parser = argparse.ArgumentParser(description="Train the DeepSight model")
     parser.add_argument(
         "--config",
@@ -147,6 +159,16 @@ def main() -> None:
     set_trainable(model.fusion, True)
     set_trainable(model.classification_head, True)
     set_trainable(model.segmentation_head, True)
+
+    # Reset optimiser for Phase 2 with all parameters
+    trainer.optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(train_cfg["learning_rate"]) * 0.5,
+        weight_decay=float(train_cfg["weight_decay"]),
+    )
+    from src.training.scheduler import build_scheduler
+    trainer.scheduler = build_scheduler(trainer.optimizer, trainer.cfg)
+
     trainer.fit(train_loader, val_loader, phase1=False)
 
 

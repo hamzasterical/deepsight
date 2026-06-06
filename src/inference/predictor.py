@@ -21,14 +21,25 @@ class Predictor:
         self,
         model: DualBranchModel,
         device: torch.device = None,
-        confidence_threshold: float = 0.5,
-        mask_threshold: float = 0.5,
+        config: Optional[dict] = None,
+        confidence_threshold: Optional[float] = None,
+        mask_threshold: Optional[float] = None,
     ):
         self.model = model
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.model.eval()
 
+        if confidence_threshold is None:
+            if config is not None:
+                confidence_threshold = float(config.get("inference", {}).get("confidence_threshold", 0.35))
+            else:
+                confidence_threshold = 0.35
+        if mask_threshold is None:
+            if config is not None:
+                mask_threshold = float(config.get("inference", {}).get("mask_threshold", 0.40))
+            else:
+                mask_threshold = 0.40
         self.confidence_threshold = confidence_threshold
         self.mask_threshold = mask_threshold
         self.srm_layer = SRMFilterLayer().to(self.device)
@@ -104,8 +115,7 @@ class Predictor:
             raise ValueError(f"Failed to read image: {path}")
         return self.predict(image)
 
-    @staticmethod
-    def _classify_forgery_type(mask: np.ndarray, verdict: str) -> str:
+    def _classify_forgery_type(self, mask: np.ndarray, verdict: str) -> str:
         if verdict != "FORGED":
             return "Unknown"
         if mask.size == 0:
@@ -113,7 +123,7 @@ class Predictor:
 
         from skimage.measure import label as connected_components
 
-        binary = (mask > 0.5).astype(np.uint8)
+        binary = (mask > self.mask_threshold).astype(np.uint8)
         num_labels = connected_components(binary, connectivity=2, return_num=True)[1]
 
         if num_labels <= 1:
