@@ -13,8 +13,9 @@ TRAIN_TRANSFORM = A.Compose([
     A.VerticalFlip(p=0.5),
     A.RandomRotate90(p=0.5),
     A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, p=0.5),
-    A.ImageCompression(quality_range=(70, 95), p=0.5),
+    A.ImageCompression(quality_range=(50, 95), p=0.5),
     A.GaussNoise(p=0.3),
+    A.GaussianBlur(blur_limit=(3, 5), p=0.2),
     A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ToTensorV2(),
 ])
@@ -58,8 +59,9 @@ GEOMETRIC_VAL = A.Compose([
 
 PHOTOMETRIC_TRAIN = A.Compose([
     A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, p=0.5),
-    A.ImageCompression(quality_range=(70, 95), p=0.5),
+    A.ImageCompression(quality_range=(50, 95), p=0.5),
     A.GaussNoise(p=0.3),
+    A.GaussianBlur(blur_limit=(3, 5), p=0.2),
 ])
 
 NORMALIZE = A.Compose([

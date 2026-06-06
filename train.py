@@ -147,6 +147,16 @@ def main() -> None:
     set_trainable(model.fusion, True)
     set_trainable(model.classification_head, True)
     set_trainable(model.segmentation_head, True)
+
+    # Reset optimiser for Phase 2 with all parameters
+    trainer.optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(train_cfg["learning_rate"]) * 0.5,
+        weight_decay=float(train_cfg["weight_decay"]),
+    )
+    from src.training.scheduler import build_scheduler
+    trainer.scheduler = build_scheduler(trainer.optimizer, trainer.cfg)
+
     trainer.fit(train_loader, val_loader, phase1=False)
 
 

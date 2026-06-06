@@ -1,0 +1,20 @@
+03:20:09 | DEBUG    | src.models.rgb_branch | Frozen all BatchNorm layers
+03:20:09 | DEBUG    | src.models.noise_branch | Frozen all BatchNorm layers in noise branch
+03:20:09 | DEBUG    | src.models.classification_head | ClassificationHead(in_features=512, dropout=0.30)
+03:20:09 | DEBUG    | src.models.segmentation_head | SegmentationHead(fused=512, decoder=[256, 128, 64, 32, 16], skips=[112, 40, 24, 16], output=1, bn=True)
+03:20:09 | DEBUG    | src.models.dual_branch | DualBranchModel(backbone=efficientnet_b0, feature_dim=1280, hidden_dim=512, dropout=0.30)
+03:20:09 | DEBUG    | src.inference.predictor | Predictor initialized (device=cpu, conf_thresh=0.50, mask_thresh=0.50)
+03:20:09 | DEBUG    | src.inference.predictor | Prediction completed in 111.02ms — AUTHENTIC (0.0%)
+INFO:     127.0.0.1:53146 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53146 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61775 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61775 - "GET /openapi.json HTTP/1.1" 200 OK
+03:21:46 | DEBUG    | src.inference.predictor | Prediction completed in 286.12ms — AUTHENTIC (0.0%)
+INFO:     127.0.0.1:63493 - "POST /api/v1/detect HTTP/1.1" 200 OK
+03:23:49 | DEBUG    | src.inference.predictor | Prediction completed in 4144.55ms — FORGED (99.2%)
+INFO:     127.0.0.1:53991 - "POST /api/v1/detect HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64752 - "POST /api/v1/detect HTTP/1.1" 400 Bad Request
+03:26:20 | DEBUG    | src.inference.predictor | Prediction completed in 286.35ms — AUTHENTIC (0.0%)
+INFO:     127.0.0.1:58909 - "POST /api/v1/detect HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52832 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52832 - "GET /health HTTP/1.1" 200 OK
