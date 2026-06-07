@@ -38,14 +38,16 @@ def create_comparison_grid(
     overlay: np.ndarray,
     title: Optional[str] = None,
 ) -> np.ndarray:
+    if mask.shape[:2] != original.shape[:2]:
+        mask = cv2.resize(mask, (original.shape[1], original.shape[0]), interpolation=cv2.INTER_NEAREST)
+    if overlay.shape[:2] != original.shape[:2]:
+        overlay = cv2.resize(overlay, (original.shape[1], original.shape[0]), interpolation=cv2.INTER_LINEAR)
+
     mask_display = np.clip(mask * 255, 0, 255).astype(np.uint8)
     mask_bgr = cv2.cvtColor(mask_display, cv2.COLOR_GRAY2BGR)
 
     top = np.hstack([original, mask_bgr])
     bottom = np.hstack([overlay, np.zeros_like(original)])
-
-    if mask.shape[:2] != original.shape[:2]:
-        mask_bgr = cv2.resize(mask_bgr, (original.shape[1], original.shape[0]))
 
     grid = np.vstack([top, bottom])
     return grid

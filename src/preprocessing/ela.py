@@ -11,7 +11,7 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_ELA_QUALITY: int = 75
-DEFAULT_ELA_AMPLIFY: float = 15.0
+DEFAULT_ELA_AMPLIFY: float = 20.0
 
 
 def _is_png_data(data: bytes) -> bool:

@@ -330,7 +330,7 @@ def extract_srm_noise_batch(
     srm_layer: nn.Module = None,
 ) -> np.ndarray:
     if images.ndim != 4 or images.shape[3] != 3:
-        raise ValueError(f"Expected NHWC batch, got shape {images.ndim}")
+        raise ValueError(f"Expected NHWC batch, got shape {images.shape}")
 
     if images.dtype == np.uint8:
         images = images.astype(np.float32)

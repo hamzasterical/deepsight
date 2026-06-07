@@ -12,7 +12,7 @@ class TestClassificationHeadInit:
         assert ClassificationHead is not None
 
     def test_constants(self):
-        assert CLASSIFICATION_HEAD_IN_FEATURES == 512
+        assert CLASSIFICATION_HEAD_IN_FEATURES == 768
 
     def test_default_init(self):
         head = ClassificationHead()

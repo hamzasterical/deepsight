@@ -117,7 +117,7 @@ def strip_exif(file_path: Union[str, Path]) -> bytes:
 class ImageLoader:
     def __init__(
         self,
-        min_file_size_kb: float = 12.0,
+        min_file_size_kb: float = 6.0,
         min_dimension: int = 32,
         convert_to_rgb: bool = True,
         apply_orientation: bool = True,
@@ -276,8 +276,6 @@ _EXIF_TAGS = {
     296: "ResolutionUnit",
     282: "XResolution",
     283: "YResolution",
-    271: "Make",
-    272: "Model",
     305: "Software",
     306: "DateTime",
     36867: "DateTimeOriginal",

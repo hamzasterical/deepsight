@@ -36,27 +36,22 @@ class Trainer:
         self.phase2_epochs = train_cfg.get("phase2_epochs", 30)
         self.lr = train_cfg.get("learning_rate", 0.0001)
         self.weight_decay = train_cfg.get("weight_decay", 0.0001)
-        self.dice_weight = train_cfg.get("dice_loss_weight", 0.5)
         self.early_stop_patience = train_cfg.get("early_stopping_patience", 7)
 
         # ── Loss ─────────────────────────────────────────────────────────────────
-        pos_weight      = float(self.cfg["training"].get("pos_weight", 1.0))
-        dice_weight     = float(self.cfg["training"].get("dice_loss_weight", 0.5))
-        bce_mask_weight = float(self.cfg["training"].get("bce_mask_weight", 0.3))
-        label_smoothing = float(self.cfg["training"].get("label_smoothing", 0.05))
+        pos_weight      = float(train_cfg.get("pos_weight", 1.0))
+        label_smoothing = float(train_cfg.get("label_smoothing", 0.05))
 
         self.criterion = CombinedLoss(
             pos_weight=pos_weight,
-            dice_weight=dice_weight,
-            bce_mask_weight=bce_mask_weight,
             label_smoothing=label_smoothing,
         ).to(self.device)
 
         # ── Optimiser ─────────────────────────────────────────────────────────────
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
-            lr=float(self.cfg["training"]["learning_rate"]),
-            weight_decay=float(self.cfg["training"]["weight_decay"]),
+            lr=float(self.lr),
+            weight_decay=float(self.weight_decay),
         )
 
         # ── Scheduler ─────────────────────────────────────────────────────────────
@@ -78,11 +73,10 @@ class Trainer:
             rgb = batch["rgb"].to(self.device)
             noise = batch["noise"].to(self.device)
             labels = batch["label"].to(self.device).float().view(-1)
-            masks = batch["mask"].to(self.device).float()
 
             self.optimizer.zero_grad()
-            pred_labels, pred_masks = self.model(rgb, noise)
-            loss = self.criterion(pred_labels, pred_masks, labels, masks)
+            pred_labels = self.model(rgb, noise)
+            loss = self.criterion(pred_labels, labels)
             loss.backward()
             self.optimizer.step()
 
@@ -90,7 +84,7 @@ class Trainer:
             num_batches += 1
 
         return {
-            "loss": total_loss / num_batches,
+            "loss": total_loss / max(num_batches, 1),
         }
 
     @torch.no_grad()
@@ -98,8 +92,6 @@ class Trainer:
         self.model.eval()
         all_labels = []
         all_preds = []
-        all_masks = []
-        all_gt_masks = []
         all_forgery_types = []
         val_loss_total = 0.0
         val_batches = 0
@@ -110,33 +102,24 @@ class Trainer:
             rgb = batch["rgb"].to(self.device)
             noise = batch["noise"].to(self.device)
             labels_np = batch["label"].cpu().numpy()
-            masks_np = batch["mask"].cpu().numpy()
+            labels_gpu = batch["label"].to(self.device).float().view(-1)
             forgery_types = batch.get("forgery_type", [None] * len(labels_np))
 
-            pred_labels, pred_masks = self.model(rgb, noise)
+            pred_labels = self.model(rgb, noise)
             pred_probs = torch.sigmoid(pred_labels)
 
-            loss = self.criterion(
-                pred_labels,
-                pred_masks,
-                batch["label"].to(self.device).float().view(-1),
-                batch["mask"].to(self.device).float(),
-            )
+            loss = self.criterion(pred_labels, labels_gpu)
             val_loss_total += loss.item()
             val_batches += 1
 
             all_labels.extend(labels_np)
             all_preds.extend(batch_to_numpy(pred_probs).flatten())
-            all_masks.extend(batch_to_numpy(pred_masks))
-            all_gt_masks.extend(masks_np)
             all_forgery_types.extend(forgery_types)
 
         all_labels = np.array(all_labels)
         all_preds = np.array(all_preds)
-        all_masks = np.array(all_masks)
-        all_gt_masks = np.array(all_gt_masks)
 
-        metrics = compute_metrics(all_labels, all_preds, all_masks, all_gt_masks, all_forgery_types)
+        metrics = compute_metrics(all_labels, all_preds, all_forgery_types)
         metrics["val_loss"] = val_loss_total / max(val_batches, 1)
         metrics["learning_rate"] = self.optimizer.param_groups[0]["lr"]
         return metrics
@@ -150,6 +133,9 @@ class Trainer:
             "epoch": epoch,
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.scheduler.state_dict(),
+            "best_val_auc": self.best_val_auc,
+            "early_stop_counter": self.early_stop_counter,
             "metrics": metrics,
             "config": self.config,
         }
@@ -188,7 +174,8 @@ class Trainer:
             "Starting %s training for %d epochs", "Phase 1" if phase1 else "Phase 2", num_epochs
         )
 
-        for epoch in range(1, num_epochs + 1):
+        start_epoch = self.current_epoch + 1
+        for epoch in range(start_epoch, num_epochs + 1):
             self.current_epoch = epoch
             start = time.time()
 
@@ -206,12 +193,12 @@ class Trainer:
 
             elapsed = time.time() - start
             logger.info(
-                "Epoch %3d/%d | loss=%.4f | val_auc=%.4f | val_f1=%.4f | val_iou=%.4f | lr=%.6f | %.2fs",
+                "Epoch %3d/%d | loss=%.4f | val_auc=%.4f | val_f1=%.4f | val_acc=%.4f | lr=%.6f | %.2fs",
                 epoch, num_epochs,
                 train_metrics["loss"],
                 val_auc,
                 val_f1,
-                val_metrics.get("overall", {}).get("iou", 0),
+                val_acc,
                 self.optimizer.param_groups[0]["lr"],
                 elapsed,
             )
@@ -219,6 +206,7 @@ class Trainer:
             # ── Persist per-epoch metrics to CSV ─────────────────────────────────────
             import csv, os
             log_path = "logs/training_log.csv"
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
             write_header = not os.path.exists(log_path) or os.path.getsize(log_path) == 0
             with open(log_path, "a", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=[
@@ -242,11 +230,10 @@ class Trainer:
             if is_best:
                 self.best_val_auc = val_auc
                 self.early_stop_counter = 0
-                self.save_checkpoint(val_metrics, is_best=True)
             else:
                 self.early_stop_counter += 1
-                if self.early_stop_counter % 3 == 0:
-                    self.save_checkpoint(val_metrics)
+            # Save checkpoint every epoch for reliable resuming
+            self.save_checkpoint(val_metrics, is_best=is_best)
 
             if self.early_stop_counter >= self.early_stop_patience:
                 logger.info("Early stopping triggered after %d epochs", epoch)
@@ -258,7 +245,10 @@ class Trainer:
         checkpoint = torch.load(filepath, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if "scheduler_state_dict" in checkpoint:
+            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         self.current_epoch = checkpoint.get("epoch", 0)
-        self.best_val_auc = checkpoint.get("metrics", {}).get("overall", {}).get("auc_roc", 0)
-        logger.info("Loaded checkpoint: %s (epoch %d)", filepath, self.current_epoch)
+        self.best_val_auc = checkpoint.get("best_val_auc", checkpoint.get("metrics", {}).get("overall", {}).get("auc_roc", 0))
+        self.early_stop_counter = checkpoint.get("early_stop_counter", 0)
+        logger.info("Loaded checkpoint: %s (epoch %d, best_auc=%.4f)", filepath, self.current_epoch, self.best_val_auc)
         return self.current_epoch

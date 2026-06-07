@@ -8,6 +8,13 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 # Combined pipelines kept for backward compatibility (used by tests / callers
 # that only need an RGB tensor).
 TRAIN_TRANSFORM = A.Compose([
+    A.PadIfNeeded(
+        min_height=224,
+        min_width=224,
+        border_mode=cv2.BORDER_CONSTANT,
+        fill=0,
+        fill_mask=0,
+    ),
     A.RandomCrop(224, 224),
     A.HorizontalFlip(p=0.5),
     A.VerticalFlip(p=0.5),

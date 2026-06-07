@@ -6,6 +6,7 @@ data:
   val_ratio: 0.10
   test_ratio: 0.10
   image_size: 224
+  seed: 42
 
 preprocessing:
   ela_quality: 75
@@ -23,8 +24,6 @@ preprocessing:
     - ".heif"
   target_size: 224
   image_interpolation: "linear"
-  mask_interpolation: "linear"
-  preserve_aspect_ratio: false
   imagenet_mean:
     - 0.485
     - 0.456
@@ -46,25 +45,22 @@ model:
   num_classes: 1
 
 training:
-  phase1_epochs: 20
-  phase2_epochs: 60
-  batch_size: 32
+  phase1_epochs: 10
+  phase2_epochs: 40
+  batch_size: 64           # T4 GPU (16 GB) handles 64 comfortably
   learning_rate: 0.0001
   weight_decay: 0.0001
-  dice_loss_weight: 0.5
-  bce_mask_weight: 0.3
   freeze_bn: false
-  early_stopping_patience: 12
+  early_stopping_patience: 8
   pos_weight: 1.0
-  warmup_epochs: 5
+  warmup_epochs: 3
   scheduler: "cosine"
   label_smoothing: 0.05
   use_weighted_sampler: true
-  num_workers: 4
+  num_workers: 4           # 4 workers keeps T4 GPU fully fed on Colab
 
 inference:
   confidence_threshold: 0.45
-  mask_threshold: 0.45
   target_ms: 50
 
 paths:

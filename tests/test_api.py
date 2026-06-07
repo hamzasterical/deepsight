@@ -15,9 +15,6 @@ class TestResponseSchema:
         fields = ForgeryResponse.model_fields
         assert "verdict" in fields
         assert "confidence" in fields
-        assert "forgery_type" in fields
-        assert "forged_area_percentage" in fields
-        assert "heatmap_base64" in fields
         assert "processing_time_ms" in fields
 
 

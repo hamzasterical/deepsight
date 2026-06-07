@@ -41,7 +41,7 @@ def read_image_paths(
     recursive: bool = False,
     min_file_size_kb: float = 0,
 ) -> List[Path]:
-    image_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"]
+    image_exts = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff"]
     files = list_files(directory, extensions=image_exts, recursive=recursive)
 
     if min_file_size_kb > 0:

@@ -21,11 +21,7 @@ class TestPredictorPredict:
         from src.inference.predictor import Predictor
         assert hasattr(Predictor, "predict_from_path")
 
-    def test_classify_forgery_type_static(self):
-        from src.inference.predictor import Predictor
-        mask = np.zeros((100, 100), dtype=np.float32)
-        ftype = Predictor._classify_forgery_type(mask, "AUTHENTIC")
-        assert ftype == "Unknown"
+
 
 
 class TestExport:

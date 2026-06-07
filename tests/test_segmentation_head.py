@@ -11,7 +11,7 @@ from src.models.segmentation_head import DecoderBlock, SegmentationHead
 
 @pytest.fixture
 def fused_features():
-    return torch.randn(2, 512, 7, 7)
+    return torch.randn(2, 768, 7, 7)
 
 
 @pytest.fixture
@@ -93,7 +93,7 @@ class TestDecoderBlockForward:
 class TestSegmentationHeadInit:
     def test_default_init(self):
         head = SegmentationHead()
-        assert head.fused_channels == 512
+        assert head.fused_channels == 768
         assert head.decoder_channels == [256, 128, 64, 32, 16]
         assert head.skip_channels == [112, 40, 24, 16]
         assert len(head.blocks) == 5
@@ -116,7 +116,7 @@ class TestSegmentationHeadInit:
 
     def test_invalid_lengths_raises(self):
         with pytest.raises(ValueError):
-            SegmentationHead(decoder_channels=[128, 64], skip_channels=[32])
+            SegmentationHead(decoder_channels=[128, 64], skip_channels=[32, 16])
 
     def test_final_conv_output_channels(self):
         head = SegmentationHead()
@@ -165,7 +165,7 @@ class TestSegmentationHeadForward:
     def test_single_sample(self):
         head = SegmentationHead()
         head.eval()
-        fused = torch.randn(1, 512, 7, 7)
+        fused = torch.randn(1, 768, 7, 7)
         skips = [torch.randn(1, ch, 14 // (2 ** i), 14 // (2 ** i)) for i, ch in enumerate([112, 40, 24, 16])]
         # Fix skip shapes: [14, 14], [28, 28], [56, 56], [112, 112]
         skips = [
@@ -206,7 +206,7 @@ class TestSegmentationHeadForward:
     def test_large_batch(self):
         head = SegmentationHead()
         head.eval()
-        fused = torch.randn(16, 512, 7, 7)
+        fused = torch.randn(16, 768, 7, 7)
         skips = [
             torch.randn(16, 112, 14, 14),
             torch.randn(16, 40, 28, 28),

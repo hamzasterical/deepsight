@@ -1,12 +1,11 @@
 import time
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import cv2
 import numpy as np
 import torch
 
-from src.inference.postprocess import postprocess
 from src.models.dual_branch import DualBranchModel
 from src.preprocessing.ela import compute_ela, ela_to_3channel
 from src.preprocessing.resize_normalise import resize_image
@@ -23,7 +22,6 @@ class Predictor:
         device: torch.device = None,
         config: Optional[dict] = None,
         confidence_threshold: Optional[float] = None,
-        mask_threshold: Optional[float] = None,
     ):
         self.model = model
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,30 +30,21 @@ class Predictor:
 
         if confidence_threshold is None:
             if config is not None:
-                confidence_threshold = float(config.get("inference", {}).get("confidence_threshold", 0.35))
+                confidence_threshold = float(config.get("inference", {}).get("confidence_threshold", 0.45))
             else:
-                confidence_threshold = 0.35
-        if mask_threshold is None:
-            if config is not None:
-                mask_threshold = float(config.get("inference", {}).get("mask_threshold", 0.40))
-            else:
-                mask_threshold = 0.40
+                confidence_threshold = 0.45
         self.confidence_threshold = confidence_threshold
-        self.mask_threshold = mask_threshold
         self.srm_layer = SRMFilterLayer().to(self.device)
         self.srm_layer.eval()
 
         logger.debug(
-            "Predictor initialized (device=%s, conf_thresh=%.2f, mask_thresh=%.2f)",
-            self.device, confidence_threshold, mask_threshold,
+            "Predictor initialized (device=%s, conf_thresh=%.2f)",
+            self.device, confidence_threshold,
         )
 
     @torch.no_grad()
     def predict(self, image: np.ndarray) -> dict:
         start = time.perf_counter()
-
-        orig_h, orig_w = image.shape[:2]
-        original_bgr = image.copy()
 
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         resized_rgb = resize_image(rgb, target_size=224)
@@ -77,27 +66,18 @@ class Predictor:
 
         noise_input = torch.cat([noise_tensor, ela_tensor], dim=1)
 
-        pred_label, pred_mask = self.model(rgb_tensor, noise_input)
+        pred_label = self.model(rgb_tensor, noise_input)
         prob = torch.sigmoid(pred_label).item()
-        mask_np = pred_mask.squeeze().cpu().numpy()
 
         verdict = "FORGED" if prob >= self.confidence_threshold else "AUTHENTIC"
         confidence = round(prob * 100.0, 2)
 
-        forgery_type = self._classify_forgery_type(mask_np, verdict)
-
-        result = postprocess(
-            mask=mask_np,
-            original_image=original_bgr,
-            original_size=(orig_w, orig_h),
-            confidence=confidence,
-            verdict=verdict,
-            forgery_type=forgery_type,
-            mask_threshold=self.mask_threshold,
-        )
-
         elapsed = (time.perf_counter() - start) * 1000
-        result["processing_time_ms"] = round(elapsed, 2)
+        result = {
+            "verdict": verdict,
+            "confidence": confidence,
+            "processing_time_ms": round(elapsed, 2),
+        }
 
         logger.debug("Prediction completed in %.2fms — %s (%.1f%%)", elapsed, verdict, confidence)
         return result
@@ -114,20 +94,3 @@ class Predictor:
         if image is None:
             raise ValueError(f"Failed to read image: {path}")
         return self.predict(image)
-
-    def _classify_forgery_type(self, mask: np.ndarray, verdict: str) -> str:
-        if verdict != "FORGED":
-            return "Unknown"
-        if mask.size == 0:
-            return "Unknown"
-
-        from skimage.measure import label as connected_components
-
-        binary = (mask > self.mask_threshold).astype(np.uint8)
-        num_labels = connected_components(binary, connectivity=2, return_num=True)[1]
-
-        if num_labels <= 1:
-            return "Retouching"
-        if num_labels <= 3:
-            return "Splicing"
-        return "Copy-Move"

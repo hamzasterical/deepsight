@@ -31,12 +31,11 @@ def export_to_onnx(
         str(save_path),
         opset_version=opset_version,
         input_names=["rgb", "noise"],
-        output_names=["label", "mask"],
+        output_names=["label"],
         dynamic_axes={
             "rgb": {0: "batch_size"},
             "noise": {0: "batch_size"},
             "label": {0: "batch_size"},
-            "mask": {0: "batch_size"},
         },
     )
 

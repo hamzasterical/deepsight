@@ -26,28 +26,45 @@ def build_dataset_metadata(
     raw_dir = Path(config["data"]["raw_dir"])
     splits_file = Path(config["data"]["splits_file"])
     splits_file.parent.mkdir(parents=True, exist_ok=True)
-    min_size_kb = config["preprocessing"].get("min_file_size_kb", 12)
+    min_size_kb = config["preprocessing"].get("min_file_size_kb", 6.0)
 
     records = []
 
     casia_dir = raw_dir / "CASIA_v2"
-    coverage_dir = raw_dir / "Coverage"
-    korus_dir = raw_dir / "Korus"
-
     if casia_dir.exists():
         records.extend(_scan_casia(casia_dir, min_size_kb))
-    if coverage_dir.exists():
-        records.extend(_scan_coverage(coverage_dir, min_size_kb))
-    if korus_dir.exists():
-        records.extend(_scan_korus(korus_dir, min_size_kb))
+
+    before = len(records)
+    records = _validate_records(records)
+    after = len(records)
+    if before - after > 0:
+        logger.warning("Hard validation dropped %d/%d unreadable records", before - after, before)
 
     if not records:
         logger.warning("No dataset records found. Check raw data paths.")
         return pd.DataFrame()
 
     df = pd.DataFrame(records)
+
+    df["forgery_type"] = (
+        df["forgery_type"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .str.replace("-", "_")
+        .str.replace(" ", "_")
+    )
+
+    # Sanity-check: only expected types
+    allowed = {"authentic", "splicing", "copy_move"}
+    actual = set(df["forgery_type"].unique())
+    unexpected = actual - allowed
+    if unexpected:
+        logger.warning("Unexpected forgery_type values (will be kept): %s", unexpected)
+
     df = _stratified_split(df, config["data"])
     df.to_csv(splits_file, index=False)
+
     logger.info(
         "Built metadata: %d images (%d train, %d val, %d test)",
         len(df),
@@ -55,25 +72,87 @@ def build_dataset_metadata(
         (df["split"] == "val").sum(),
         (df["split"] == "test").sum(),
     )
+    logger.info("Label breakdown:  authentic=%d  forged=%d",
+                 (df["label"] == 0).sum(), (df["label"] == 1).sum())
+    logger.info("Forgery-type breakdown:\n%s", df["forgery_type"].value_counts().to_string())
+    logger.info("Split × forgery-type breakdown:\n%s",
+                df.groupby(["split", "forgery_type"]).size().to_string())
+
     return df
+
+
+def _is_readable_image(path: str) -> bool:
+    p = Path(path)
+    if not p.exists():
+        return False
+    img = cv2.imread(str(p))
+    return img is not None and img.ndim == 3 and img.shape[2] == 3
+
+
+def _is_readable_mask(path: str) -> bool:
+    p = Path(path)
+    if not p.exists():
+        return False
+    m = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+    return m is not None and m.ndim == 2
+
+
+def _validate_records(records: List[Dict]) -> List[Dict]:
+    """Drop unreadable images. Forged records without masks are allowed
+    (mask branch receives a zero target — classification still trains correctly)."""
+    good = []
+    for r in records:
+        if not _is_readable_image(r["image_path"]):
+            logger.debug("Dropping unreadable image: %s", r["image_path"])
+            continue
+        good.append(r)
+    return good
+
+
+# ── CASIA v2 ─────────────────────────────────────────────────────────────────
+
+def _resolve_casia_subdirs(casia_dir: Path):
+    """Return (au_dir, tp_dir) regardless of whether dirs are named
+    Au/Tp (older download) or Au_jpg/Tp_jpg (Kaggle download)."""
+    au_candidates = ["Au", "Au_jpg", "au", "au_jpg"]
+    tp_candidates = ["Tp", "Tp_jpg", "tp", "tp_jpg"]
+
+    au_dir = None
+    for name in au_candidates:
+        candidate = casia_dir / name
+        if candidate.exists():
+            au_dir = candidate
+            break
+
+    tp_dir = None
+    for name in tp_candidates:
+        candidate = casia_dir / name
+        if candidate.exists():
+            tp_dir = candidate
+            break
+
+    return au_dir, tp_dir
 
 
 def _scan_casia(casia_dir: Path, min_size_kb: float) -> List[Dict]:
     records = []
-    au_dir = casia_dir / "Au"
-    tp_dir = casia_dir / "Tp"
+    au_dir, tp_dir = _resolve_casia_subdirs(casia_dir)
 
-    if au_dir.exists():
+    if au_dir:
+        logger.info("CASIA authentic dir: %s", au_dir)
         for img_path in read_image_paths(au_dir, recursive=True, min_file_size_kb=min_size_kb):
             records.append({
                 "image_path": str(img_path),
                 "mask_path": "",
                 "label": 0,
-                "forgery_type": "Authentic",
+                "forgery_type": "authentic",
                 "dataset_source": "CASIA_v2",
             })
+    else:
+        logger.warning("CASIA: no authentic (Au/Au_jpg) directory found under %s", casia_dir)
 
-    if tp_dir.exists():
+    if tp_dir:
+        logger.info("CASIA tampered dir: %s", tp_dir)
         for img_path in read_image_paths(tp_dir, recursive=True, min_file_size_kb=min_size_kb):
             mask_path = _find_casia_mask(img_path, tp_dir)
             ftype = _detect_casia_forgery_type(img_path)
@@ -84,105 +163,75 @@ def _scan_casia(casia_dir: Path, min_size_kb: float) -> List[Dict]:
                 "forgery_type": ftype,
                 "dataset_source": "CASIA_v2",
             })
+    else:
+        logger.warning("CASIA: no tampered (Tp/Tp_jpg) directory found under %s", casia_dir)
 
+    logger.info("CASIA scan complete: %d total records", len(records))
     return records
 
 
 def _find_casia_mask(img_path: Path, tp_dir: Path) -> Optional[Path]:
-    mask_name = img_path.stem + "_mask" + img_path.suffix
-    mask_path = img_path.parent / "mask" / mask_name
-    if mask_path.exists():
-        return mask_path
-    mask_path = tp_dir / "mask" / mask_name
-    if mask_path.exists():
-        return mask_path
+    candidates = []
+
+    candidates.append(img_path.parent / "mask" / f"{img_path.stem}_mask{img_path.suffix}")
+    candidates.append(tp_dir / "mask" / f"{img_path.stem}_mask{img_path.suffix}")
+
+    gt_dir = tp_dir / "GT"
+    candidates.append(gt_dir / f"{img_path.stem}.png")
+    candidates.append(gt_dir / f"{img_path.stem}_gt.png")
+    candidates.append(gt_dir / f"{img_path.stem}_mask.png")
+
+    candidates.append(img_path.parent / "GT" / f"{img_path.stem}.png")
+    candidates.append(img_path.parent / "GT" / f"{img_path.stem}_gt.png")
+
+    for p in candidates:
+        if p.exists():
+            return p
+
     return None
 
 
 def _detect_casia_forgery_type(img_path: Path) -> str:
-    name = img_path.stem.lower()
-    if "copy" in name or "move" in name:
-        return "Copy-Move"
+    stem = img_path.stem
+    parts = stem.split("_")
+    if len(parts) >= 2:
+        op = parts[1].upper()
+        if op == "D":
+            return "Copy-Move"
+        if op == "S":
+            return "Splicing"
     return "Splicing"
 
 
-def _scan_coverage(coverage_dir: Path, min_size_kb: float) -> List[Dict]:
-    records = []
-    image_dir = coverage_dir / "image"
-    mask_dir = coverage_dir / "mask"
-
-    if not image_dir.exists():
-        return records
-
-    mask_map = {}
-    if mask_dir.exists():
-        for mask_path in list_files(mask_dir, extensions=[".png", ".jpg", ".jpeg", ".tif", ".tiff"]):
-            mask_map[mask_path.stem] = mask_path
-
-    for img_path in read_image_paths(image_dir, recursive=True, min_file_size_kb=min_size_kb):
-        mask_path = mask_map.get(img_path.stem)
-        records.append({
-            "image_path": str(img_path),
-            "mask_path": str(mask_path) if mask_path else "",
-            "label": 1,
-            "forgery_type": "Copy-Move",
-            "dataset_source": "Coverage",
-        })
-
-    return records
-
-
-def _scan_korus(korus_dir: Path, min_size_kb: float) -> List[Dict]:
-    records = []
-    data_dir = korus_dir / "data-images"
-
-    if not data_dir.exists():
-        return records
-
-    for img_path in read_image_paths(data_dir, recursive=True, min_file_size_kb=min_size_kb):
-        name = img_path.stem.lower()
-        if "tampered" in name or "forged" in name:
-            records.append({
-                "image_path": str(img_path),
-                "mask_path": "",
-                "label": 1,
-                "forgery_type": "Retouching",
-                "dataset_source": "Korus",
-            })
-        else:
-            records.append({
-                "image_path": str(img_path),
-                "mask_path": "",
-                "label": 0,
-                "forgery_type": "Authentic",
-                "dataset_source": "Korus",
-            })
-
-    return records
-
+# ── Split ─────────────────────────────────────────────────────────────────────
 
 def _stratified_split(df: pd.DataFrame, data_config: dict) -> pd.DataFrame:
     train_ratio = data_config.get("train_ratio", 0.8)
     val_ratio = data_config.get("val_ratio", 0.1)
 
+    rng = np.random.RandomState(data_config.get("seed", 42))
+
     df = df.copy()
     df["split"] = "test"
 
-    for ftype in df["forgery_type"].unique():
-        type_idx = df[df["forgery_type"] == ftype].index.to_numpy(copy=True)
-        np.random.shuffle(type_idx)
-        n = len(type_idx)
+    df["strata"] = df["label"].astype(str) + "_" + df["forgery_type"].astype(str)
+
+    for strata in df["strata"].unique():
+        idx = df[df["strata"] == strata].index.to_numpy(copy=True)
+        rng.shuffle(idx)
+        n = len(idx)
         n_train = int(n * train_ratio)
         n_val = int(n * val_ratio)
 
-        train_idx = type_idx[:n_train]
-        val_idx = type_idx[n_train:n_train + n_val]
+        df.loc[idx[:n_train], "split"] = "train"
+        df.loc[idx[n_train:n_train + n_val], "split"] = "val"
+        df.loc[idx[n_train + n_val:], "split"] = "test"
 
-        df.loc[train_idx, "split"] = "train"
-        df.loc[val_idx, "split"] = "val"
-
+    df = df.drop(columns=["strata"])
     return df
 
+
+# ── Dataset ───────────────────────────────────────────────────────────────────
 
 class ForgeryDataset(Dataset):
     def __init__(
@@ -191,6 +240,7 @@ class ForgeryDataset(Dataset):
         split: str = "train",
         transform=None,
         srm_layer: Optional[SRMFilterLayer] = None,
+        ela_amplify: float = 20.0,
     ):
         self.data = dataframe[dataframe["split"] == split].reset_index(drop=True)
         self.split = split
@@ -198,6 +248,7 @@ class ForgeryDataset(Dataset):
         self.photometric = get_photometric_transform(split)
         self.normalize = get_normalize_transform()
         self.srm_layer = srm_layer
+        self.ela_amplify = ela_amplify
         self._srm_cache = {}
         self._logged_missing: set = set()
 
@@ -233,7 +284,6 @@ class ForgeryDataset(Dataset):
         import numpy as np
 
         image_path = str(row["image_path"])
-        mask_path  = str(row.get("mask_path", ""))
         label      = int(row["label"])
         forgery_type = str(row.get("forgery_type", "authentic"))
 
@@ -244,23 +294,10 @@ class ForgeryDataset(Dataset):
             return None
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        mask = None
-        if isinstance(mask_path, str) and mask_path and mask_path != "nan" and Path(mask_path).exists():
-            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask is not None:
-                _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-                mask = mask.astype(np.float32) / 255.0
-
-        if mask is None:
-            mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.float32)
-
-        geo = self.geometric(image=img, mask=mask)
+        geo = self.geometric(image=img)
         image_aug = geo["image"]
-        mask_aug = geo["mask"]
 
-        mask_tensor = torch.from_numpy(np.ascontiguousarray(mask_aug)).unsqueeze(0).float()
-
-        ela = compute_ela(image_aug)
+        ela = compute_ela(image_aug, amplify=self.ela_amplify)
         ela_3ch = ela_to_3channel(ela)
         ela_tensor = torch.from_numpy(ela_3ch.transpose(2, 0, 1).astype(np.float32) / 255.0)
         if ela_tensor.shape[0] == 1:
@@ -280,7 +317,6 @@ class ForgeryDataset(Dataset):
             "rgb": rgb,
             "noise": noise_input,
             "label": torch.tensor([label], dtype=torch.float32),
-            "mask": mask_tensor,
             "forgery_type": forgery_type,
             "image_path": image_path,
         }
@@ -303,20 +339,14 @@ def create_dataloaders(
     num_workers: int = 0,
     srm_layer: Optional[SRMFilterLayer] = None,
 ) -> Tuple:
-    splits_file = Path(config["data"]["splits_file"])
-    if not splits_file.exists() or splits_file.stat().st_size == 0:
-        df = build_dataset_metadata(config)
-    else:
-        try:
-            df = pd.read_csv(splits_file)
-        except pd.errors.EmptyDataError:
-            df = build_dataset_metadata(config)
+    df = build_dataset_metadata(config)
 
-    train_ds = ForgeryDataset(df, "train", srm_layer=srm_layer)
-    val_ds = ForgeryDataset(df, "val", srm_layer=srm_layer)
-    test_ds = ForgeryDataset(df, "test", srm_layer=srm_layer)
+    ela_amplify = float(config.get("preprocessing", {}).get("ela_amplify", 20.0))
+    train_ds = ForgeryDataset(df, "train", srm_layer=srm_layer, ela_amplify=ela_amplify)
+    val_ds = ForgeryDataset(df, "val", srm_layer=srm_layer, ela_amplify=ela_amplify)
+    test_ds = ForgeryDataset(df, "test", srm_layer=srm_layer, ela_amplify=ela_amplify)
 
-    # ── Weighted sampler to fix 3.5:1 authentic:forged imbalance ─────────────
+    # ── Weighted sampler to handle class imbalance ────────────────────────────
     use_sampler = config.get("training", {}).get("use_weighted_sampler", True)
 
     if use_sampler:

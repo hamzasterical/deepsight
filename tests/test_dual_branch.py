@@ -11,9 +11,9 @@ class TestDualBranchModelInit:
         assert model.noise_branch is not None
         assert model.fusion is not None
         assert model.classification_head is not None
-        assert model.segmentation_head is not None
+        assert not hasattr(model, "segmentation_head")
         assert model.feature_dim == 1280
-        assert model.hidden_dim == 512
+        assert model.hidden_dim == 768
 
     def test_custom_config(self):
         model = DualBranchModel(feature_dim=640, hidden_dim=256, dropout=0.1)
@@ -35,36 +35,24 @@ class TestDualBranchModelForward:
         model.eval()
         rgb = torch.randn(1, 3, 224, 224)
         noise = torch.randn(1, 33, 224, 224)
-        label, mask = model(rgb, noise)
+        label = model(rgb, noise)
         assert label.shape == (1, 1)
-        assert mask.shape == (1, 1, 224, 224)
 
     def test_forward_batch(self):
         model = DualBranchModel()
         model.eval()
         rgb = torch.randn(4, 3, 224, 224)
         noise = torch.randn(4, 33, 224, 224)
-        label, mask = model(rgb, noise)
+        label = model(rgb, noise)
         assert label.shape == (4, 1)
-        assert mask.shape == (4, 1, 224, 224)
 
     def test_forward_dtype(self):
         model = DualBranchModel()
         model.eval()
         rgb = torch.randn(2, 3, 224, 224)
         noise = torch.randn(2, 33, 224, 224)
-        label, mask = model(rgb, noise)
+        label = model(rgb, noise)
         assert label.dtype == torch.float32
-        assert mask.dtype == torch.float32
-
-    def test_mask_output_is_probability(self):
-        model = DualBranchModel()
-        model.eval()
-        rgb = torch.randn(1, 3, 224, 224)
-        noise = torch.randn(1, 33, 224, 224)
-        _, mask = model(rgb, noise)
-        assert mask.min() >= 0.0
-        assert mask.max() <= 1.0
 
 
 class TestDualBranchModelPredict:
@@ -72,17 +60,16 @@ class TestDualBranchModelPredict:
         model = DualBranchModel()
         rgb = torch.randn(1, 3, 224, 224)
         noise = torch.randn(1, 33, 224, 224)
-        prob, mask = model.predict(rgb, noise)
+        prob = model.predict(rgb, noise)
         assert prob.shape == (1, 1)
         assert prob.min() >= 0.0
         assert prob.max() <= 1.0
-        assert mask.shape == (1, 1, 224, 224)
 
     def test_predict_uses_no_grad(self):
         model = DualBranchModel()
         rgb = torch.randn(1, 3, 224, 224, requires_grad=True)
         noise = torch.randn(1, 33, 224, 224)
-        prob, mask = model.predict(rgb, noise)
+        prob = model.predict(rgb, noise)
         assert rgb.grad is None
 
 

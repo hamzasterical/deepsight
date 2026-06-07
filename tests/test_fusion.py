@@ -40,7 +40,7 @@ class TestFeatureFusionInit:
         assert fusion.rgb_dim == 1280
         assert fusion.noise_dim == 1280
         assert fusion.fused_dim == 2560
-        assert fusion.hidden_dim == 512
+        assert fusion.hidden_dim == 768
 
     def test_custom_dims(self):
         fusion = FeatureFusion(rgb_dim=512, noise_dim=512, hidden_dim=256)
@@ -83,17 +83,17 @@ class TestFeatureFusionForward:
     def test_forward_2d_inputs(self, rgb_feats_2d, noise_feats_2d):
         fusion = FeatureFusion()
         out = fusion(rgb_feats_2d, noise_feats_2d)
-        assert out.shape == (4, 512, 1, 1)
+        assert out.shape == (4, 768, 1, 1)
 
     def test_forward_4d_inputs(self, rgb_feats_4d, noise_feats_4d):
         fusion = FeatureFusion()
         out = fusion(rgb_feats_4d, noise_feats_4d)
-        assert out.shape == (4, 512, 1, 1)
+        assert out.shape == (4, 768, 1, 1)
 
     def test_forward_mixed_dims(self, rgb_feats_2d, noise_feats_4d):
         fusion = FeatureFusion()
         out = fusion(rgb_feats_2d, noise_feats_4d)
-        assert out.shape == (4, 512, 1, 1)
+        assert out.shape == (4, 768, 1, 1)
 
     def test_forward_output_dtype(self, rgb_feats_2d, noise_feats_2d):
         fusion = FeatureFusion()
@@ -103,7 +103,7 @@ class TestFeatureFusionForward:
     def test_forward_flat(self, rgb_feats_2d, noise_feats_2d):
         fusion = FeatureFusion()
         out = fusion.forward_flat(rgb_feats_2d, noise_feats_2d)
-        assert out.shape == (4, 512)
+        assert out.shape == (4, 768)
 
     def test_single_sample(self):
         fusion = FeatureFusion()
@@ -111,7 +111,7 @@ class TestFeatureFusionForward:
         rgb = torch.randn(1, 1280)
         noise = torch.randn(1, 1280)
         out = fusion(rgb, noise)
-        assert out.shape == (1, 512, 1, 1)
+        assert out.shape == (1, 768, 1, 1)
 
     def test_gradient_flow(self, rgb_feats_2d, noise_feats_2d):
         fusion = FeatureFusion()
@@ -246,4 +246,4 @@ class TestFusionEdgeCases:
         rgb = torch.randn(64, 1280)
         noise = torch.randn(64, 1280)
         out = fusion(rgb, noise)
-        assert out.shape == (64, 512, 1, 1)
+        assert out.shape == (64, 768, 1, 1)

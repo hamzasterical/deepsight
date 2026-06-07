@@ -245,7 +245,7 @@ class TestSummary:
 class TestEdgeCases:
     def test_loader_defaults_do_not_crash(self):
         loader = ImageLoader()
-        assert loader.min_file_size_kb == 12.0
+        assert loader.min_file_size_kb == 6.0
         assert loader.min_dimension == 32
         assert loader.convert_to_rgb is True
         assert loader.apply_orientation is True
