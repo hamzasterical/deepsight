@@ -1,7 +1,11 @@
 data/raw/
-models/
+/models/
 logs/
+!src/models/
 .env
 __pycache__/
 *.pyc
 *.pyo
+
+# transport artifact, never commit
+CASIA_v2.zip
