@@ -57,7 +57,7 @@ training:
   scheduler: "cosine"
   label_smoothing: 0.05
   use_weighted_sampler: true
-  num_workers: 4           # 4 workers keeps T4 GPU fully fed on Colab
+  num_workers: 2           # 2 workers to avoid excessive worker creation on this system
 
 inference:
   confidence_threshold: 0.45
